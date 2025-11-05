@@ -13,7 +13,14 @@ from dotenv import load_dotenv
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-@@ -24,21 +23,30 @@
+load_dotenv(".env")  
+api_key = os.getenv("GOOGLE_API_KEY")  
+MONGO_URI = os.getenv("MONGO_URI")
+MODEL_NAME = os.getenv("MODEL_NAME")
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel(MODEL_NAME)
+
+client = MongoClient(MONGO_URI)
 db = client["food-del"]
 collection = db["foods"]
 
@@ -24,18 +31,6 @@ def get_food_list():
     return foods
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def ask_gemini(question: str, food_list: list) -> str:
     """
     Gửi câu hỏi + dữ liệu món ăn cho Gemini AI, trả về text đẹp, hỗ trợ bán online
@@ -44,11 +39,37 @@ def ask_gemini(question: str, food_list: list) -> str:
     for f in food_list:
         price = f.get('price', 0)
         points = int(price / 100000 * 10)
-
         line = f"- {f['name']}: {f.get('description', 'Không có mô tả')} - {price}đ - Điểm tích lũy: {points}"
         food_lines.append(line)
+    
+    food_text = "\n".join(food_lines)
+    
+    prompt = f"""
+Bạn là chatbot nhà hàng Tomato, chỉ bán online, địa chỉ website: https://www.tomato.com
+Hỗ trợ thanh toán qua Stripe, phí giao hàng: 30.000đ.
+Khách mua món sẽ được tích điểm: 100.000đ = 10 điểm.
 
-@@ -73,55 +81,55 @@
+Danh sách món ăn hiện có:
+{food_text}
+
+Hướng dẫn AI:
+- Chỉ trả lời đúng ý câu hỏi, không lan man.
+- Nếu câu hỏi liên quan món ăn, điểm tích lũy, giá hoặc loại món, mới thêm thông tin danh sách hoặc điểm.
+- Nếu câu hỏi về đặt món, thanh toán, giờ mở cửa… chỉ hướng dẫn cách đặt và thanh toán online.
+- Không liệt kê tất cả món ăn hoặc thông tin không liên quan.
+- Nhấn mạnh phí ship, cách thanh toán online và tích điểm nếu phù hợp.
+- Trả lời ngắn gọn, tự nhiên, dễ đọc, không dùng dấu ** hay *.
+
+Khách hàng hỏi: {question}
+"""
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json()
+    question = data.get("message", "").strip()
     if not question:
         return jsonify({"reply": "Xin lỗi, bạn chưa nhập câu hỏi."}), 400
 
@@ -102,6 +123,5 @@ def recommendation(food_id):
     return jsonify(result)
 
 if __name__ == "__main__":
-
     app.debug = True
     app.run()
