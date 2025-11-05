@@ -9,7 +9,6 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 
-
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
@@ -24,13 +23,21 @@ client = MongoClient(MONGO_URI)
 db = client["food-del"]
 collection = db["foods"]
 
-def get_food_list():
-    foods = list(
-        collection.find({}, {"_id": 0, "name": 1, "price": 1, "description": 1})
-    )
-    return foods
+# 💡 KHỞI TẠO CACHE GLOBAL CHO DANH SÁCH MÓN ĂN
+CACHED_FOOD_LIST = [] 
 
-
+def load_initial_data():
+    """Tải danh sách món ăn vào cache khi ứng dụng khởi động."""
+    global CACHED_FOOD_LIST
+    try:
+        foods = list(
+            collection.find({}, {"_id": 0, "name": 1, "price": 1, "description": 1})
+        )
+        CACHED_FOOD_LIST = foods
+        print(f"✅ Đã tải thành công {len(CACHED_FOOD_LIST)} món ăn vào cache.")
+    except Exception as e:
+        print(f"❌ Lỗi khi tải dữ liệu từ MongoDB: {e}")
+        
 def ask_gemini(question: str, food_list: list) -> str:
     """
     Gửi câu hỏi + dữ liệu món ăn cho Gemini AI, trả về text đẹp, hỗ trợ bán online
@@ -38,7 +45,8 @@ def ask_gemini(question: str, food_list: list) -> str:
     food_lines = []
     for f in food_list:
         price = f.get('price', 0)
-        points = int(price / 100000 * 10)
+        # Đảm bảo tính toán điểm không gây lỗi
+        points = int(price / 100000 * 10) if price and price >= 100000 else 0 
         line = f"- {f['name']}: {f.get('description', 'Không có mô tả')} - {price}đ - Điểm tích lũy: {points}"
         food_lines.append(line)
     
@@ -73,12 +81,11 @@ def chat():
     if not question:
         return jsonify({"reply": "Xin lỗi, bạn chưa nhập câu hỏi."}), 400
 
-    food_list = get_food_list()
-    reply = ask_gemini(question, food_list)
+    # 💡 SỬ DỤNG DỮ LIỆU ĐÃ CACHE, không cần truy vấn DB lại
+    reply = ask_gemini(question, CACHED_FOOD_LIST)
 
     reply_clean = reply.replace("**", "").replace("*", "")
     return jsonify({"reply": reply_clean})
-
 
 
 def top_recommend(food_index, cosine_similarity, top_n=4):
@@ -123,5 +130,6 @@ def recommendation(food_id):
     return jsonify(result)
 
 if __name__ == "__main__":
+    load_initial_data() # 💡 Tải dữ liệu vào cache khi chạy
     app.debug = True
     app.run()
